@@ -2,7 +2,9 @@ import json
 import requests
 import time
 import re
+import os
 from datetime import datetime
+from pathlib import Path
 
 class CoalMiningBot:
     def __init__(self, config_file='config.json'):
@@ -14,34 +16,78 @@ class CoalMiningBot:
         self.llm_api_url = self.config.get('llm_api_url', 'https://api.openai.com/v1')
         self.llm_model = self.config.get('llm_model', 'gpt-4')
         self.cooldown_between_solves = self.config.get('cooldown_seconds', 5)
-        self.stats = {'total_solves': 0, 'total_score': 0, 'failed_attempts': 0}
+        self.stats_file = 'mining_stats.json'
+        self.stats = self.load_stats()
         
-    def request_challenge(self):
+    def load_stats(self):
+        """Load stats from file"""
+        if os.path.exists(self.stats_file):
+            try:
+                with open(self.stats_file, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        return {'total_solves': 0, 'total_score': 0, 'failed_attempts': 0, 'history': []}
+    
+    def save_stats(self):
+        """Save stats to file"""
+        try:
+            with open(self.stats_file, 'w') as f:
+                json.dump(self.stats, f, indent=2)
+        except Exception as e:
+            print(f"⚠ Could not save stats: {e}")
+        
+    def request_challenge(self, retry_count=0):
         """Request a new COAL mining challenge"""
         url = f"{self.api_url}/api/challenges/request?wallet={self.wallet}"
         
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=15)
             data = response.json()
             
             if response.status_code == 200:
-                print(f"✓ Challenge received (ID: {data['challengeId']}, Epoch: {data['epoch']})")
+                challenge_id_short = data['challengeId'][:12]
+                print(f"✓ Challenge {challenge_id_short}... (Epoch: {data['epoch']})")
                 return data
             elif response.status_code == 403 and data.get('error') == 'insufficient_coal':
                 print(f"✗ Insufficient COAL: {data.get('message')}")
-                print(f"  Minimum: {data.get('minCoal')}, Balance: {data.get('balanceRaw')}")
+                balance = data.get('balanceRaw', 0)
+                min_coal = data.get('minCoal', 250000)
+                print(f"  Need: {min_coal:,} COAL | Have: {balance:,} COAL")
                 return None
             elif response.status_code == 429:
+                error_type = data.get('error', '')
                 retry_after = data.get('retryAfter', 1)
-                print(f"⏳ Cooldown: wait {retry_after}s")
-                time.sleep(retry_after)
-                return self.request_challenge()
+                
+                if 'active_challenge' in error_type:
+                    print(f"⚠ Active challenge exists. Recovering...")
+                    # Return the active challenge data
+                    if 'challengeId' in data:
+                        return data
+                    return None
+                else:
+                    print(f"⏳ Cooldown: {retry_after}s")
+                    time.sleep(retry_after)
+                    return None
             else:
-                print(f"✗ Error: {data.get('error', 'Unknown error')}")
+                error_msg = data.get('error', 'Unknown error')
+                print(f"✗ Request error: {error_msg}")
+                if retry_count < 2:
+                    time.sleep(3)
+                    return self.request_challenge(retry_count + 1)
                 return None
                 
+        except requests.exceptions.Timeout:
+            print(f"✗ Request timeout")
+            if retry_count < 2:
+                time.sleep(5)
+                return self.request_challenge(retry_count + 1)
+            return None
         except Exception as e:
             print(f"✗ Request failed: {e}")
+            if retry_count < 2:
+                time.sleep(3)
+                return self.request_challenge(retry_count + 1)
             return None
     
     def solve_challenge(self, challenge):
@@ -191,6 +237,13 @@ QUESTIONS:
                 
                 self.stats['total_solves'] += 1
                 self.stats['total_score'] += score
+                self.stats['history'].append({
+                    'timestamp': datetime.now().isoformat(),
+                    'score': score,
+                    'total': total,
+                    'failed': failed
+                })
+                self.save_stats()
                 
                 return True
             elif response.status_code == 503 or 'rate limit' in str(data.get('error', '')).lower():

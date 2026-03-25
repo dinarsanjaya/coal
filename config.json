@@ -1,9 +1,9 @@
 {
   "api_url": "https://coalmine.fun",
   "wallet": "6TRpehv9xrnSz257taqtxLsduBs7CNJqMADf35TBgk2Q",
-  "llm_api_key": "sk-Ua4xfRVfqVvyz2uN0waeamWcIJpflTs4enOd9xvtN66kdSsZ",
-  "llm_api_url": "https://api.bluesminds.com/v1",
-  "llm_model": "claude-opus-4-6",
+  "llm_api_key": "sk-JN9vq76q5c3nDiNaRgANtENg",
+  "llm_api_url": "http://134.209.32.17:8317/v1",
+  "llm_model": "gpt-5.3-codex",
   "cooldown_seconds": 10,
   "auto_restart": true
 }
